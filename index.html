@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html style="font-family:serif;">
+    <head>
+        <title></title>
+        <script>
+            function my_func() {
+                console.log("JS my_func()");
+                return false;
+            }
+            
+            var Module = {
+                noExitRuntime: true,
+                onRuntimeInitialized: function() {
+                    document.querySelector("#loading-indicator").style.display = "none";
+                    document.querySelector("#canvas").style.display = "block";
+                },
+            }
+        </script>
+        <script async src="vmm.js"></script>
+    </head>
+    <body style="display:flex;justify-content:center;align-items:center;width:100vw;height:100vh;margin:0;color:white;background-color:black;">
+        <div id="loading-indicator">
+            <h3 id="loading-indicator">Loading Emscripten...</h3>
+            <p>If you see this for a long time, check that your browser supports WebAssembly</p>
+        </div>
+        <canvas id="canvas" style="display:none;width:100%;height:100%;"></canvas>
+    </body>
+</html>

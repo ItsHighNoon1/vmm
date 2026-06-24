@@ -1,0 +1,7 @@
+-Iemsdk/upstream/emscripten/cache/sysroot/include
+-Ibox2d/include
+-Isrc/include
+-D__EMSCRIPTEN__
+-Lbox2d/build/src
+-lbox2d
+-Wno-unused-command-line-argument

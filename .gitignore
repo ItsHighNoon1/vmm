@@ -1,0 +1,10 @@
+# Binary files
+obj/
+vmm.wasm
+vmm.js
+
+# Symlink to Emscripten SDK
+emsdk
+
+# Git clone of the Box2D repo
+box2d/
