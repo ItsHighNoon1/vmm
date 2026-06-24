@@ -1,6 +1,6 @@
 -Iemsdk/upstream/emscripten/cache/sysroot/include
 -Ibox2d/include
--Isrc/include
+-Isrc
 -D__EMSCRIPTEN__
 -Lbox2d/build/src
 -lbox2d

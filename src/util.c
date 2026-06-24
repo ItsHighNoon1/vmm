@@ -1,6 +1,6 @@
-#include "util.h"
+#include "vmm.h"
 
-#include "render.h"
+#include <emscripten.h>
 
 static void _texture_load_success(unsigned int handle, void* user_data, const char* filename) {
     Texture_t* slot = (Texture_t*)user_data;
