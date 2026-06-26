@@ -2,6 +2,7 @@
 -Ibox2d/include
 -Isrc
 -D__EMSCRIPTEN__
+-DNDEBUG
 -Lbox2d/build/src
 -lbox2d
 -Wno-unused-command-line-argument

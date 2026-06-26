@@ -5,7 +5,7 @@
 #include <emscripten.h>
 #include <SDL3/SDL.h>
 
-#define MIN_DISTANCE 50
+#define MIN_DISTANCE 1
 
 GameState_t game_state;
 Part_t* parts;
@@ -74,19 +74,35 @@ void interface_tick() {
                 n_vertex_draw_list++;
                 break;
             case SDL_EVENT_MOUSE_BUTTON_UP:
-                if (event.button.button != SDL_BUTTON_LEFT) {
+                if (game_state != DRAWING || event.button.button != SDL_BUTTON_LEFT || !vertex_draw_list) {
                     break;
                 }
-                if (game_state != DRAWING || vertex_draw_list) {
-                    if (n_parts >= s_parts) {
-                        s_parts *= 2;
-                        parts = realloc(parts, s_parts * sizeof(Part_t));
+
+                if (n_vertex_draw_list < 3) {
+                    // Probably a bolt, not a part
+                    if (n_bolts >= s_bolts) {
+                        s_bolts *= 2;
+                        bolts = realloc(bolts, s_bolts * sizeof(Bolt_t));
                     }
-                    parts[n_parts].flags = PART_FLAGS_LAYER_0 | PART_FLAGS_MOVABLE | PART_FLAGS_EDITABLE;
-                    parts[n_parts].vertices = realloc(vertex_draw_list, 2 * n_vertex_draw_list * sizeof(float));
-                    parts[n_parts].n_vertices = n_vertex_draw_list;
-                    n_parts++;
+                    bolts[n_bolts].x = event.button.x;
+                    bolts[n_bolts].y = event.button.y;
+                    bolts[n_bolts].force = 0.0f;
+                    bolts[n_bolts].torque = 0.0f;
+                    n_bolts++;
+                    break;
+                } 
+
+                // A part
+                if (n_parts >= s_parts) {
+                    s_parts *= 2;
+                    parts = realloc(parts, s_parts * sizeof(Part_t));
                 }
+                parts[n_parts].flags = PART_FLAGS_LAYER_0 | PART_FLAGS_MOVABLE | PART_FLAGS_EDITABLE;
+                parts[n_parts].vertices = realloc(vertex_draw_list, 2 * n_vertex_draw_list * sizeof(float));
+                parts[n_parts].n_vertices = n_vertex_draw_list;
+                n_parts++;
+
+                // Reset for next draw
                 n_vertex_draw_list = 0;
                 s_vertex_draw_list = 0;
                 vertex_draw_list = NULL;
@@ -131,7 +147,9 @@ void interface_tick() {
 void interface_render() {
     SDL_SetRenderDrawColor(renderer, 0, 0x56, 0xA3, SDL_ALPHA_OPAQUE);
     SDL_RenderClear(renderer);
-    SDL_SetRenderDrawColor(renderer, 0xFF, 0xFF, 0xFF, SDL_ALPHA_OPAQUE);
+    SDL_SetRenderDrawColor(renderer, 0xFB, 0xF7, 0xF5, SDL_ALPHA_OPAQUE);
+
+    // Finished parts
     for (int part_idx = 0; part_idx < n_parts; part_idx++) {
         for (int vertex_idx = 0; vertex_idx < parts[part_idx].n_vertices; vertex_idx++) {
             float x1 = parts[part_idx].vertices[2 * vertex_idx + 0];
@@ -148,14 +166,26 @@ void interface_render() {
             SDL_RenderLine(renderer, x1, y1, x2, y2);
         }
     }
+
+    // Bolts
+    for (int bolt_idx = 0; bolt_idx < n_bolts; bolt_idx++) {
+        SDL_RenderLine(renderer, 
+            bolts[bolt_idx].x - 2.0f, bolts[bolt_idx].y - 2.0f,
+            bolts[bolt_idx].x + 2.0f, bolts[bolt_idx].y + 2.0f);
+        SDL_RenderLine(renderer, 
+            bolts[bolt_idx].x - 2.0f, bolts[bolt_idx].y + 2.0f,
+            bolts[bolt_idx].x + 2.0f, bolts[bolt_idx].y - 2.0f);
+    }
+
+    // Current drawing
     for (int vertex_idx = 0; vertex_idx < n_vertex_draw_list; vertex_idx++) {
         float x1 = vertex_draw_list[2 * vertex_idx + 0];
         float y1 = vertex_draw_list[2 * vertex_idx + 1];
         float x2;
         float y2;
         if (vertex_idx + 1 == n_vertex_draw_list) {
-            x2 = vertex_draw_list[0];
-            y2 = vertex_draw_list[1];
+            x2 = last_mouse_x;
+            y2 = last_mouse_y;
         } else {
             x2 = vertex_draw_list[2 * vertex_idx + 2];
             y2 = vertex_draw_list[2 * vertex_idx + 3];

@@ -23,8 +23,7 @@ void render_render() {
             interface_render();
             break;
         case SIMULATING:
-            //SDL_SetRenderDrawColor(renderer, 0xF2, 0xDC, 0xB1, SDL_ALPHA_OPAQUE);
-            //SDL_RenderClear(renderer);
+            physics_render();
             break;
         default:
             break;
