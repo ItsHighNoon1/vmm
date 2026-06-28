@@ -3,6 +3,8 @@
     <head>
         <title></title>
         <script>
+            document.addEventListener('contextmenu', event => event.preventDefault());
+            
             function my_func() {
                 console.log("JS my_func()");
                 return false;

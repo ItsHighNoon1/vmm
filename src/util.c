@@ -1,19 +1,23 @@
 #include "vmm.h"
 
-#include <emscripten.h>
+#include <stdio.h>
 
 static void _texture_load_success(unsigned int handle, void* user_data, const char* filename) {
     Texture_t* slot = (Texture_t*)user_data;
     
     SDL_Surface* surface = SDL_LoadPNG(filename);
     if (!surface) {
+        printf("Texture load failure: %s\n", SDL_GetError());
         slot->load_state = FAILED;
         slot->http_code = -1;
+        return;
     }
     slot->texture = SDL_CreateTextureFromSurface(renderer, surface);
     if (!slot->texture) {
+        printf("Texture object creation failure: %s\n", SDL_GetError());
         slot->load_state = FAILED;
         slot->http_code = -2;
+        return;
     }
     slot->load_state = FETCHED;
     SDL_DestroySurface(surface);

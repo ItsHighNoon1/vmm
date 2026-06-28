@@ -1,6 +1,8 @@
 #pragma once
 
+#include <SDL3/SDL_audio.h>
 #include <box2d/box2d.h>
+#include <emscripten.h>
 #include <SDL3/SDL.h>
 
 // Types
@@ -50,6 +52,8 @@ extern GameState_t game_state;
 // SDL globals
 extern SDL_Window* window;
 extern SDL_Renderer* renderer;
+extern SDL_AudioStream* audio_stream;
+extern SDL_AudioSpec audio_spec;
 
 // Renderer functions
 void render_init();
@@ -71,3 +75,8 @@ void physics_teardown();
 
 // Util functions
 void load_texture_async(Texture_t* slot, char* url);
+inline void await_texture(Texture_t* texture) {
+    if (texture->load_state == INPROGRESS) {
+        emscripten_sleep(500);
+    }
+}

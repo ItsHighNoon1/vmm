@@ -6,3 +6,4 @@
 -Lbox2d/build/src
 -lbox2d
 -Wno-unused-command-line-argument
+-O2

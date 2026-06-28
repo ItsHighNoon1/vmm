@@ -1,7 +1,8 @@
-#include "box2d/types.h"
 #include "vmm.h"
 
+#include <SDL3/SDL_audio.h>
 #include <assert.h>
+#include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
 
@@ -32,6 +33,11 @@ typedef struct {
 } PhysicsObject_t;
 
 typedef struct {
+    PhysicsObject_t* parent;
+    b2Vec2 offset;
+} PhysicsBolt_t;
+
+typedef struct {
     PhysicsObject_t** parts;
     int count;
 } BoltQueryParms_t;
@@ -40,44 +46,27 @@ b2WorldId world_id;
 PhysicsObject_t* bodies;
 int n_bodies;
 int s_bodies;
-Bolt_t* saved_bolts;
-int n_saved_bolts;
+PhysicsBolt_t* render_bolts;
+int n_render_bolts;
+Texture_t iron_texture;
+Texture_t bolt_texture;
 
 static bool bolt_query_callback(b2ShapeId shape_id, void* user) {
     BoltQueryParms_t* bolt_query_parms = (BoltQueryParms_t*)user;
     if (bolt_query_parms->parts) {
         b2BodyId body_id = b2Shape_GetBody(shape_id);
-        bolt_query_parms->parts[bolt_query_parms->count] = (PhysicsObject_t*)b2Body_GetUserData(body_id);
+        PhysicsObject_t* found_part = (PhysicsObject_t*)b2Body_GetUserData(body_id);
+        for (int part_idx = 0; part_idx < bolt_query_parms->count; part_idx++) {
+            if (found_part == bolt_query_parms->parts[part_idx]) {
+                // We already hit this part
+                return true;
+            }
+        }
+        bolt_query_parms->parts[bolt_query_parms->count++] = found_part;
+    } else {
+        bolt_query_parms->count++;
     }
-    bolt_query_parms->count++;
     return true;
-}
-
-static bool is_in_circumcircle(Triangle_t* t, float v_x, float v_y) {
-    // https://en.wikipedia.org/wiki/Circumcircle#Cartesian_coordinates_2
-    // https://brandewinder.com/2025/03/19/delaunay-triangulation-circumcircle/
-    // I never was good at this circle stuff, I hope LLVM is cracked
-    float d = 2.0f * (
-        t->p[0].x * (t->p[1].y - t->p[2].y) +
-        t->p[1].x * (t->p[2].y - t->p[0].y) +
-        t->p[2].x * (t->p[0].y - t->p[1].y));
-    float x = 
-        (t->p[0].x * t->p[0].x + t->p[0].y * t->p[0].y) * (t->p[1].y - t->p[2].y) +
-        (t->p[1].x * t->p[1].x + t->p[1].y * t->p[1].y) * (t->p[2].y - t->p[0].y) +
-        (t->p[2].x * t->p[2].x + t->p[2].y * t->p[2].y) * (t->p[0].y - t->p[1].y);
-    float y = 
-        (t->p[0].x * t->p[0].x + t->p[0].y * t->p[0].y) * (t->p[2].x - t->p[1].x) +
-        (t->p[1].x * t->p[1].x + t->p[1].y * t->p[1].y) * (t->p[0].x - t->p[2].x) +
-        (t->p[2].x * t->p[2].x + t->p[2].y * t->p[2].y) * (t->p[1].x - t->p[0].x);
-    float cx = x / d;
-    float cy = y / d;
-    float r_dx = t->p[0].x - cx;
-    float r_dy = t->p[0].y - cy;
-    float r2 = r_dx * r_dx + r_dy * r_dy;
-    float v_dx = v_x - cx;
-    float v_dy = v_y - cy;
-    float v_r2 = v_dx * v_dx + v_dy * v_dy;
-    return v_r2 < r2;
 }
 
 static bool is_in_triangle(Triangle_t* t, float v_x, float v_y) {
@@ -101,7 +90,7 @@ static void triangulate(int n_vertices, float* vertices, int* n_triangles, Trian
     int n_working_vertices = n_vertices;
 
     // We need to know the winding order for triangulation, so we will flip the vertices if we
-    // find that the polygon is clockwise winding order
+    // find that the polygon is counterclockwise winding order
     float ccw_test = 0.0f;
     for (int edge_idx = 0; edge_idx < n_vertices; edge_idx++) {
         float x1 = vertices[2 * edge_idx + 0];
@@ -110,7 +99,7 @@ static void triangulate(int n_vertices, float* vertices, int* n_triangles, Trian
         float y2 = vertices[2 * ((edge_idx + 1) % n_vertices) + 1];
         ccw_test += (x2 - x1) * (y2 + y1);
     }
-    if (ccw_test > 0.0f) {
+    if (ccw_test < 0.0f) {
         for (int v_idx = 0; v_idx < n_vertices; v_idx++) {
             int working_idx = n_vertices - v_idx - 1;
             working_vertices[2 * working_idx + 0] = vertices[2 * v_idx + 0];
@@ -131,7 +120,7 @@ static void triangulate(int n_vertices, float* vertices, int* n_triangles, Trian
             float cx = working_vertices[2 * c_idx + 0];
             float cy = working_vertices[2 * c_idx + 1];
             float d = (bx - ax) * (cy - by) - (by - ay) * (cx - bx);
-            if (d <= 0.0f) {
+            if (d >= 0.0f) {
                 // This is an exterior triangle
                 continue;
             }
@@ -172,6 +161,8 @@ static void triangulate(int n_vertices, float* vertices, int* n_triangles, Trian
 }
 
 void physics_init() {
+    load_texture_async(&iron_texture, "res/iron.png");
+    load_texture_async(&bolt_texture, "res/bolt.png");
     world_id = b2_nullWorldId;
     bodies = NULL;
     n_bodies = 0;
@@ -179,10 +170,17 @@ void physics_init() {
 }
 
 void physics_tick() {
-    float dt = 1.0f / 30.0f;
-    int sub_step_count = 8;
-    if (b2World_IsValid(world_id)) {
-        b2World_Step(world_id, dt, sub_step_count);
+    if (game_state == SIMULATING) {
+        float dt = 1.0f / 30.0f;
+        int sub_step_count = 8;
+        if (b2World_IsValid(world_id)) {
+            b2World_Step(world_id, dt, sub_step_count);
+            b2ContactEvents events = b2World_GetContactEvents(world_id);
+            for (int e_idx = 0; e_idx < events.hitCount; e_idx++) {
+                // I would play a sound here but this is where I was
+                // when I decided to throw in the towel
+            }
+        }
     }
 }
 
@@ -261,7 +259,10 @@ void physics_build(int n_parts, Part_t* parts, int n_bolts, Bolt_t* bolts) {
         bodies[n_bodies].body_id = b2CreateBody(world_id, &body_def);
         b2ShapeDef shape_def = b2DefaultShapeDef();
         shape_def.density = 1.0f;
-        shape_def.material.friction = 0.3f;
+        shape_def.material.friction = 0.1f;
+        shape_def.material.restitution = 0.1f;
+        shape_def.enableContactEvents = true;
+        shape_def.enableHitEvents = true;
         for (int tri_idx = 0; tri_idx < n_triangles; tri_idx++) {
             b2Hull triangle_hull = b2ComputeHull(&triangles[tri_idx].p[0].vec, 3);
             b2Polygon triangle_polygon = b2MakePolygon(&triangle_hull, 0.0f);
@@ -274,10 +275,13 @@ void physics_build(int n_parts, Part_t* parts, int n_bolts, Bolt_t* bolts) {
         n_bodies++;
     }
 
-    // Bolt state
-    n_saved_bolts = n_bolts;
-    saved_bolts = bolts;
-    for (int bolt_idx = 0; bolt_idx < n_saved_bolts; bolt_idx++) {
+    // Bolt stage
+    if (render_bolts != NULL) {
+        free(render_bolts);
+    }
+    render_bolts = malloc(n_bolts * sizeof(PhysicsBolt_t));
+    n_render_bolts = 0;
+    for (int bolt_idx = 0; bolt_idx < n_bolts; bolt_idx++) {
         b2Vec2 bolt_pos = { bolts[bolt_idx].x, bolts[bolt_idx].y };
         b2ShapeProxy proxy = b2MakeProxy(&bolt_pos, 1, 0.0f);
 
@@ -291,16 +295,51 @@ void physics_build(int n_parts, Part_t* parts, int n_bolts, Bolt_t* bolts) {
         parms.count = 0;
         
         b2World_OverlapShape(world_id, b2Pos_zero, &proxy, b2DefaultQueryFilter(), bolt_query_callback, &parms);
+
+        // Add it to the render list
+        b2BodyId first_body = parms.parts[0]->body_id;
+        b2Vec2 first_position = b2Body_GetPosition(first_body);
+        b2Transform first_transform = {
+            { bolt_pos.x - first_position.x, bolt_pos.y - first_position.y },
+            { 1.0f, 0.0f },
+        };
+        render_bolts[n_render_bolts].parent = parms.parts[0];
+        render_bolts[n_render_bolts].offset = first_transform.p;
+        n_render_bolts++;
         if (parms.count == 1) {
             if (++parms.parts[0]->n_bolts_to_wall >= 2) {
                 // 2 bolts makes it static
                 b2Body_SetType(parms.parts[0]->body_id, b2_staticBody);
             } else {
-                // Make a dummy body at the bolt position and create a joint
-                // TODO
+                b2RevoluteJointDef joint_def = b2DefaultRevoluteJointDef();
+                joint_def.base.bodyIdA = first_body;
+                joint_def.base.localFrameA = first_transform;
+
+                // Make a dummy body at the bolt position to bind to
+                b2BodyDef wall_anchor_def = b2DefaultBodyDef();
+                wall_anchor_def.type = b2_staticBody;
+                wall_anchor_def.position = bolt_pos;
+                joint_def.base.bodyIdB = b2CreateBody(world_id, &wall_anchor_def);
+                b2Transform wall_anchor_transform = {
+                    { 0.0f, 0.0f },
+                    { 1.0f, 0.0f },
+                };
+                joint_def.base.localFrameB = wall_anchor_transform;
+
+                b2CreateRevoluteJoint(world_id, &joint_def);
             }
         } else if (parms.count == 2) {
-
+            b2RevoluteJointDef joint_def = b2DefaultRevoluteJointDef();
+            joint_def.base.bodyIdA = first_body;
+            joint_def.base.localFrameA = first_transform;
+            joint_def.base.bodyIdB = parms.parts[1]->body_id;
+            b2Vec2 second_position = b2Body_GetPosition(parms.parts[1]->body_id);
+            b2Transform second_transform = {
+                { bolt_pos.x - second_position.x, bolt_pos.y - second_position.y },
+                { 1.0f, 0.0f },
+            };
+            joint_def.base.localFrameB = second_transform;
+            b2CreateRevoluteJoint(world_id, &joint_def);
         } else {
             printf("Unsupported number of parts for one bolt: %d\n", parms.count);
         }
@@ -309,29 +348,42 @@ void physics_build(int n_parts, Part_t* parts, int n_bolts, Bolt_t* bolts) {
 }
 
 void physics_render() {
-    SDL_SetRenderDrawColor(renderer, 0xF2, 0xDC, 0xB1, SDL_ALPHA_OPAQUE);
+    SDL_SetRenderDrawColor(renderer, 0x1D, 0x2E, 0x28, SDL_ALPHA_OPAQUE);
     SDL_RenderClear(renderer);
-    SDL_SetRenderDrawColor(renderer, 0x57, 0x57, 0x57, SDL_ALPHA_OPAQUE);
     for (int body_idx = 0; body_idx < n_bodies; body_idx++) {
         b2WorldTransform transform = b2Body_GetTransform(bodies[body_idx].body_id);
+        Triangle_t transformed_triangles[bodies[body_idx].n_triangles];
+        Triangle_t texcoord_triangles[bodies[body_idx].n_triangles];
         for (int tri_idx = 0; tri_idx < bodies[body_idx].n_triangles; tri_idx++) {
-            Triangle_t* triangle = &bodies[body_idx].triangles[tri_idx];
-            b2Vec2 a = b2TransformWorldPoint(transform, triangle->p[0].vec);
-            b2Vec2 b = b2TransformWorldPoint(transform, triangle->p[1].vec);
-            b2Vec2 c = b2TransformWorldPoint(transform, triangle->p[2].vec);
-            SDL_RenderLine(renderer, a.x, a.y, b.x, b.y);
-            SDL_RenderLine(renderer, b.x, b.y, c.x, c.y);
-            SDL_RenderLine(renderer, c.x, c.y, a.x, a.y);
+            transformed_triangles[tri_idx].p[0].vec = b2TransformWorldPoint(transform, bodies[body_idx].triangles[tri_idx].p[0].vec);
+            transformed_triangles[tri_idx].p[1].vec = b2TransformWorldPoint(transform, bodies[body_idx].triangles[tri_idx].p[1].vec);
+            transformed_triangles[tri_idx].p[2].vec = b2TransformWorldPoint(transform, bodies[body_idx].triangles[tri_idx].p[2].vec);
+            texcoord_triangles[tri_idx].p[0].vec = b2MulSV(0.01f, bodies[body_idx].triangles[tri_idx].p[0].vec);
+            texcoord_triangles[tri_idx].p[1].vec = b2MulSV(0.01f, bodies[body_idx].triangles[tri_idx].p[1].vec);
+            texcoord_triangles[tri_idx].p[2].vec = b2MulSV(0.01f, bodies[body_idx].triangles[tri_idx].p[2].vec);
         }
+        
+        SDL_FColor vertex_color;
+        vertex_color.r = 1.0f;
+        vertex_color.g = 1.0f;
+        vertex_color.b = 1.0f;
+        vertex_color.a = SDL_ALPHA_OPAQUE_FLOAT;
+        SDL_GetError();
+        SDL_SetRenderTextureAddressMode(renderer, SDL_TEXTURE_ADDRESS_WRAP, SDL_TEXTURE_ADDRESS_WRAP);
+        SDL_RenderGeometryRaw(renderer, iron_texture.texture,
+            &transformed_triangles[0].p[0].x, sizeof(b2Vec2), // positions
+            &vertex_color, 0, // colors
+            &texcoord_triangles[0].p[0].x, sizeof(b2Vec2), // texcoords
+            bodies[body_idx].n_triangles * 3, NULL, 0, 0); // indicates
     }
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
-    for (int bolt_idx = 0; bolt_idx < n_saved_bolts; bolt_idx++) {
-        SDL_RenderLine(renderer,
-            saved_bolts[bolt_idx].x - 2.0f, saved_bolts[bolt_idx].y,
-            saved_bolts[bolt_idx].x + 2.0f, saved_bolts[bolt_idx].y);
-        SDL_RenderLine(renderer,
-            saved_bolts[bolt_idx].x, saved_bolts[bolt_idx].y + 2.0f,
-            saved_bolts[bolt_idx].x, saved_bolts[bolt_idx].y - 2.0f);
+    for (int bolt_idx = 0; bolt_idx < n_render_bolts; bolt_idx++) {
+        b2WorldTransform transform = b2Body_GetTransform(render_bolts[bolt_idx].parent->body_id);
+        b2Vec2 p = b2TransformWorldPoint(transform, render_bolts[bolt_idx].offset);
+        SDL_FRect destination = { p.x - 4.0f, p.y - 4.0f, 8.0f, 8.0f };
+        SDL_FPoint center = { 4.0f, 4.0f };
+        float angle = b2Rot_GetAngle(transform.q);
+        SDL_RenderTextureRotated(renderer, bolt_texture.texture, NULL, &destination, angle * (180.0f / M_PI), &center, SDL_FLIP_NONE);
     }
     SDL_RenderPresent(renderer);
 }

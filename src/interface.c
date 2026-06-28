@@ -6,6 +6,7 @@
 #include <SDL3/SDL.h>
 
 #define MIN_DISTANCE 1
+#define DELETE_DISTANCE 5
 
 GameState_t game_state;
 Part_t* parts;
@@ -57,22 +58,77 @@ void interface_tick() {
                 emscripten_cancel_main_loop();
                 return;
             case SDL_EVENT_MOUSE_BUTTON_DOWN:
-                if (game_state != DRAWING || event.button.button != SDL_BUTTON_LEFT) {
+                if (game_state != DRAWING) {
                     break;
                 }
-                if (vertex_draw_list != NULL) {
-                    // ???
-                    free(vertex_draw_list);
+                if (event.button.button == SDL_BUTTON_LEFT) {
+                    if (vertex_draw_list != NULL) {
+                        // ???
+                        free(vertex_draw_list);
+                    }
+                    n_vertex_draw_list = 0;
+                    s_vertex_draw_list = 10;
+                    vertex_draw_list = malloc(2 * s_vertex_draw_list * sizeof(float));
+                    last_mouse_x = event.button.x;
+                    last_mouse_y = event.button.y;
+                    vertex_draw_list[2 * n_vertex_draw_list + 0] = last_mouse_x;
+                    vertex_draw_list[2 * n_vertex_draw_list + 1] = last_mouse_y;
+                    n_vertex_draw_list++;
+                    break;
+                } else if (event.button.button == SDL_BUTTON_RIGHT) {
+                    last_mouse_x = event.button.x;
+                    last_mouse_y = event.button.y;
+                    for (int part_idx = n_parts - 1; part_idx >= 0; part_idx--) {
+                        bool is_close_enough = false;
+                        for (int v_idx = 0; v_idx < parts[part_idx].n_vertices; v_idx++) {
+                            float ax = parts[part_idx].vertices[2 * v_idx + 0];
+                            float ay = parts[part_idx].vertices[2 * v_idx + 1];
+                            float bx;
+                            float by;
+                            if (v_idx == parts[part_idx].n_vertices - 1) {
+                                bx = parts[part_idx].vertices[0];
+                                by = parts[part_idx].vertices[1];
+                            } else {
+                                bx = parts[part_idx].vertices[2 * v_idx + 2];
+                                by = parts[part_idx].vertices[2 * v_idx + 3];
+                            }
+                            float dx = bx - ax;
+                            float dy = by - ay;
+                            float length2 = dx * dx + dy * dy;
+                            float t = ((last_mouse_x - ax) * (bx - ax) + (last_mouse_y - ay) * (by - ay)) / length2;
+                            if (t > 1.0f) {
+                                t = 1.0f;
+                            } else if (t < 0.0f) {
+                                t = 0.0f;
+                            }
+                            float cx = ax + t * dx;
+                            float cy = ay + t * dy;
+                            float dcx = cx - last_mouse_x;
+                            float dcy = cy - last_mouse_y;
+                            if (dcx * dcx + dcy * dcy < DELETE_DISTANCE * DELETE_DISTANCE) {
+                                is_close_enough = true;
+                                break;
+                            }
+                        }
+                        if (is_close_enough) {
+                            free(parts[part_idx].vertices);
+                            for (int rm_idx = part_idx; rm_idx < n_parts - 1; rm_idx++) {
+                                memcpy(&parts[rm_idx], &parts[rm_idx + 1], sizeof(Part_t));
+                            }
+                            n_parts--;
+                        }
+                    }
+                    for (int bolt_idx = n_bolts - 1; bolt_idx >= 0; bolt_idx--) {
+                        float dx = bolts[bolt_idx].x - last_mouse_x;
+                        float dy = bolts[bolt_idx].y - last_mouse_y;
+                        if (dx * dx + dy * dy < DELETE_DISTANCE * DELETE_DISTANCE) {
+                            for (int rm_idx = bolt_idx; rm_idx < n_bolts - 1; rm_idx++) {
+                                memcpy(&bolts[rm_idx], &bolts[rm_idx + 1], sizeof(Bolt_t));
+                            }
+                            n_bolts--;
+                        }
+                    }
                 }
-                n_vertex_draw_list = 0;
-                s_vertex_draw_list = 10;
-                vertex_draw_list = malloc(2 * s_vertex_draw_list * sizeof(float));
-                last_mouse_x = event.button.x;
-                last_mouse_y = event.button.y;
-                vertex_draw_list[2 * n_vertex_draw_list + 0] = last_mouse_x;
-                vertex_draw_list[2 * n_vertex_draw_list + 1] = last_mouse_y;
-                n_vertex_draw_list++;
-                break;
             case SDL_EVENT_MOUSE_BUTTON_UP:
                 if (game_state != DRAWING || event.button.button != SDL_BUTTON_LEFT || !vertex_draw_list) {
                     break;
@@ -89,6 +145,11 @@ void interface_tick() {
                     bolts[n_bolts].force = 0.0f;
                     bolts[n_bolts].torque = 0.0f;
                     n_bolts++;
+
+                    free(vertex_draw_list);
+                    n_vertex_draw_list = 0;
+                    s_vertex_draw_list = 0;
+                    vertex_draw_list = NULL;
                     break;
                 } 
 
