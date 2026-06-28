@@ -1,4 +1,4 @@
-### Volubilis Machinamentum
+# Volubilis Machinamentum
 *"rotating mechanism"*
 
 A physics-based puzzle game about machines created for [The Very Serious Juniper Dev Game Jam](https://itch.io/jam/theveryseriousjuniperdevgamejam),
