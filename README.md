@@ -16,6 +16,7 @@ Some of the ideas were:
 - Turn electricity into spinning motion with a motor
 - Use a spinning motor and gears to create a clock
 - Use a spinning motor to create an air compressor
+
 The implementation of these levels would have required more components in the editor than just arbitrary shapes and bolts.
 Like belts, hoses, valves, coils, a tool to create perfect circles/gears, etc.
 Even without these things, I still found it fun to play around in the editor.
@@ -43,6 +44,7 @@ SDL3 is fairly new and I unfortunately did not have a good time using it. Three 
 1. All of the resources online are for SDL2,
 2. The details of this project just make rendering hard in general,
 3. Weird interactions with Emscripten.
+
 Admittedly, SDL2 would have absolutely been a good choice.
 That's on me for not knowing at the outset.
 
@@ -61,6 +63,7 @@ Ok, that's fine, but there are so many things that you need for that:
 - Ok now I need some way to simulate with the concept of "high pressure steam" which includes valves
 - Ok the average player won't be able to hook the valve up to the flywheel so probably I should give them [tag sensors](https://littlebigplanet.fandom.com/wiki/Tag_Sensor)
 - Ok to connect the sensors to the valve there needs to be wires or something
+
 which kind of starts to feel like too much scope.
 Typically in this situation you start cutting scope, but
 
